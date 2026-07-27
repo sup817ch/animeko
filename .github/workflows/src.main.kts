@@ -819,13 +819,18 @@ val commonIgnoredPaths = listOf(
     "scripts/*",
 )
 
+val IOS_IPA_CI_BRANCH = "codex/ios-ipa-ci"
+
 workflow(
     name = "Build",
     on = listOf(
         // Including: 
         // - pushing directly to main
         // - pushing to a branch that has an associated PR
-        Push(pathsIgnore = commonIgnoredPaths),
+        Push(
+            branchesIgnore = listOf(IOS_IPA_CI_BRANCH),
+            pathsIgnore = commonIgnoredPaths,
+        ),
         PullRequest(pathsIgnore = commonIgnoredPaths),
     ),
     sourceFile = __FILE__,
@@ -903,6 +908,57 @@ workflow(
             Runner.GithubUbuntu2404,
         ).forEach { runner ->
             addVerifyJob(build, runner, build.result.eq(AbstractResult.Status.Success))
+        }
+    }
+}
+
+workflow(
+    name = "iOS IPA",
+    on = listOf(
+        Push(branches = listOf(IOS_IPA_CI_BRANCH)),
+    ),
+    sourceFile = __FILE__,
+    targetFileName = "ios-ipa.yml",
+    consistencyCheckJobConfig = ConsistencyCheckJobConfig.Disabled,
+) {
+    val matrix = MatrixInstance(
+        runner = Runner.GithubMacOS15AppleSilicon,
+        uploadApk = false,
+        uploadIpa = true,
+        composeResourceTriple = "macos-aarch64",
+        runTests = false,
+        uploadDesktopInstallers = false,
+        extraGradleArgs = listOf(
+            "-P$ANI_ANDROID_ABIS=arm64-v8a",
+        ),
+        enableIos = true,
+        buildIosFramework = true,
+        buildAllAndroidAbis = false,
+        gradleHeap = "4g",
+        kotlinCompilerHeap = "4g",
+        gradleParallel = false,
+    )
+
+    job(
+        id = "build_ios_debug_ipa",
+        name = "Build iOS Debug IPA",
+        runsOn = RunnerType.Labelled(matrix.runsOn),
+        permissions = mapOf(
+            Permission.Actions to Mode.Write,
+        ),
+    ) {
+        uses(action = Checkout(submodules_Untyped = "recursive"))
+
+        with(WithMatrix(matrix)) {
+            freeSpace()
+            deleteLocalProperties()
+            writeLocalProperties()
+            installJbr21()
+            chmod777()
+            setupGradle()
+            prepareIosBuild()
+            buildIosIpaDebug()
+            cleanupTempFiles()
         }
     }
 }
